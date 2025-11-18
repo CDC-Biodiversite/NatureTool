@@ -1,0 +1,127 @@
+---
+title: "Run_NatureTool"
+output: html_document
+date: "2025-11-06"
+    
+params:
+    
+  input_data:
+    label: "Input excel file with portfolio information"
+    value: NULL
+    input: file
+  
+---
+
+## Nature Tool Assessment
+
+This code extracts biodiversity impacts and dependencies of financial portfolio from a database. This database contains impacts and dependencies results for more than 6,000 companies and their 90,000 subsidiaries.
+
+``` {r Loading packages and functions, echo = FALSE}
+
+library(readxl)
+library(openxlsx)
+library(dplyr)
+library(tibble)
+
+source("../R/functions.R") # Upload the functions
+```
+
+```{r Load input data, echo = FALSE}
+
+#input_data <- read_xlsx(params$input_file)
+input_data <- read_xlsx("~/GitHub/NatureTool/Input files/NatureTool_Input_File_Template.xlsx", sheet = "Input_data")
+load("../data/isin2lei_mapping_final.rda")
+load("../data/companies_data_final.rda")
+  
+```
+
+``` {r Data coverage and subsidiaries retreiving, echo = FALSE}
+
+# Data coverage
+portfolio_stats <- get_company_data(input_data)
+share_portfolio_covered <- portfolio_stats$share_portfolio_covered
+portfolio_data <- portfolio_stats$portfolio_data
+
+cat(paste0("The share of portfolio covered is ", round(share_portfolio_covered * 100, 2), "%."))
+
+# Subsidiaries retreiving
+portfolio_treated_data <- get_subsidiaries(portfolio_data, isin2lei_mapping_final)
+  
+```
+
+```{r Turnover calculation, echo = FALSE}
+
+# Load data
+rotation_ratios <- read_xlsx("../data/NACE_rotation_ratios_final.xlsx")
+exchange_rates <- read_xlsx("../data/2024_INSEE_Exchange_rates_EUR.xlsx", sheet = "Data_for_NatureTool") # Update file if exhange rates have changed
+load("../data/countries_correspondence_table.rda")
+
+# Computation
+portfolio_complete_data <- portfolio_treated_data %>%
+  left_join((countries_correspondence_table %>% select(alpha_2_code, rotation_ratio_country)), by = c("Country" = "alpha_2_code")) %>%
+  left_join((rotation_ratios %>% select(Country, NACE_Rev2_Code, rotation_ratio)), by = c("rotation_ratio_country" = "Country", "NACE" = "NACE_Rev2_Code")) %>%
+  left_join((exchange_rates %>% select(Currency_code, Currency_to_EUR_rate_2024)), by = c("Currency" = "Currency_code")) %>%
+  mutate(Turnover_attributed_EUR = Amount_attributed * rotation_ratio * Currency_to_EUR_rate_2024)
+            
+```
+
+```{r Impacts attribution, echo = FALSE}
+
+# Load data
+load("../data/all_impacts.rda")
+load(("../data/impacts_by_entity.rda"))
+results_path <- paste0("~/GitHub/NatureTool/Assessment/", Sys.Date(),"_Nature_Tool_results.xlsx")
+
+# Computation
+portfolio_impacts <- get_impacts(portfolio_complete_data, all_impacts)
+
+# Line by line impacts: for each ISIN in the input file, impacts across of all subsidiaries and all associated Exiobase industries)
+portfolio_all_impacts <- portfolio_impacts$portfolio_all_impacts
+# Aggregated impacts by Scope, Pressure, Realm and Accounting category for each ISIN of the input file
+impacts_by_isin <- portfolio_impacts$portfolio_impacts_by_isin
+# Aggregated impacts by Scope, Pressure, Realm and Accounting category for across all subsidiaries (no Exiobase industry breakdown)
+impacts_by_subsidiary <- portfolio_impacts$portfolio_impacts_by_subsidiary
+  
+```
+
+```{r Dependencies attribution, echo = FALSE}
+
+# Load data
+load("../data/dependencies_average_by_entity.rda")
+load(("../data/dependencies_critical_by_entity.rda"))
+
+# Average dependencies
+
+portfolio_dependencies_average <- get_dependencies(portfolio_complete_data, dependencies_average_by_entity)
+# Average dependencies by entity (Name business & Group) for each ISIN in the input file and its subsidiaries
+dependencies_average <- portfolio_dependencies_average$portfolio_dependencies
+# Aggregated dependencies for each ISIN of the input file (no subsidiaries breakdown)
+dependencies_average_by_isin <- portfolio_dependencies_average$portfolio_dependencies_by_isin
+
+# Critical dependencies
+
+portfolio_dependencies_critical <- get_dependencies(portfolio_complete_data, dependencies_critical_by_entity)
+# Average dependencies by entity (Name business & Group) for each ISIN in the input file and its subsidiaries
+dependencies_critical <- portfolio_dependencies_critical$portfolio_dependencies
+# Aggregated dependencies for each ISIN of the input file (no subsidiaries breakdown)
+dependencies_critical_by_isin <- portfolio_dependencies_critical$portfolio_dependencies_by_isin
+
+```
+
+```{r Save impacts and dependencies, echo = FALSE}
+
+results_path <- paste0("~/GitHub/NatureTool/Assessment/", Sys.Date(),"_Nature_Tool_results.xlsx")
+
+wb <- createWorkbook()
+
+addWorksheet(wb, sheet="portfolio_impacts", gridLines = TRUE)
+writeData(wb, sheet = "portfolio_impacts", portfolio_impacts_by_isin)
+addWorksheet(wb, sheet="portfolio_dependencies_average", gridLines = TRUE)
+writeData(wb, sheet = "portfolio_dependencies_average", dependencies_average_by_isin)
+addWorksheet(wb, sheet="portfolio_dependencies_critical", gridLines = TRUE)
+writeData(wb, sheet = "portfolio_dependencies_critical", dependencies_critical_by_isin)
+
+saveWorkbook(wb, file = results_path, overwrite = TRUE)
+
+```
+
