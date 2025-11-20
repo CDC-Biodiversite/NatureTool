@@ -12,9 +12,11 @@ params:
   
 ---
 
-## Nature Tool Assessment
+# NATURE TOOL ASSESSMENT
 
 This code extracts biodiversity impacts and dependencies of financial portfolio from a database. This database contains impacts and dependencies results for more than 6,000 companies and their 90,000 subsidiaries.
+
+# ----------- Pre-treatment ------------
 
 ``` {r Loading packages and functions, echo = FALSE}
 
@@ -53,7 +55,7 @@ portfolio_treated_data <- get_subsidiaries(portfolio_data, isin2lei_mapping_fina
 
 # Load data
 rotation_ratios <- read_xlsx("../data/NACE_rotation_ratios_final.xlsx")
-exchange_rates <- read_xlsx("../data/2024_INSEE_Exchange_rates_EUR.xlsx", sheet = "Data_for_NatureTool") # Update file if exhange rates have changed
+exchange_rates <- read_xlsx("../data/2024_INSEE_Exchange_rates_EUR.xlsx", sheet = "Data_for_NatureTool") # Update file if exchange rates have changed
 load("../data/countries_correspondence_table.rda")
 
 # Computation
@@ -65,6 +67,8 @@ portfolio_complete_data <- portfolio_treated_data %>%
             
 ```
 
+# ----------- Impacts attribution ------------
+
 ```{r Impacts attribution, echo = FALSE}
 
 # Load data
@@ -73,16 +77,18 @@ load(("../data/impacts_by_entity.rda"))
 results_path <- paste0("~/GitHub/NatureTool/Assessment/", Sys.Date(),"_Nature_Tool_results.xlsx")
 
 # Computation
-portfolio_impacts <- get_impacts(portfolio_complete_data, all_impacts)
+portfolio_impacts <- get_impacts(portfolio_complete_data, all_impacts, impacts_by_entity)
 
-# Line by line impacts: for each ISIN in the input file, impacts across of all subsidiaries and all associated Exiobase industries)
+# No aggregation - Line by line impacts: for each ISIN in the input file, impacts across of all subsidiaries and all associated Exiobase industries)
 portfolio_all_impacts <- portfolio_impacts$portfolio_all_impacts
-# Aggregated impacts by Scope, Pressure, Realm and Accounting category for each ISIN of the input file
-impacts_by_isin <- portfolio_impacts$portfolio_impacts_by_isin
-# Aggregated impacts by Scope, Pressure, Realm and Accounting category for across all subsidiaries (no Exiobase industry breakdown)
+# Aggregation level 1 - Aggregated impacts by Scope, Pressure, Realm and Accounting category for across all subsidiaries (no Exiobase industry breakdown)
 impacts_by_subsidiary <- portfolio_impacts$portfolio_impacts_by_subsidiary
+# Aggregation level 2 - Aggregated impacts by Scope, Pressure, Realm and Accounting category for each ISIN of the input file
+impacts_by_isin <- portfolio_impacts$portfolio_impacts_by_isin
   
 ```
+
+# ----------- Dependencies attribution ------------
 
 ```{r Dependencies attribution, echo = FALSE}
 
@@ -94,7 +100,7 @@ load(("../data/dependencies_critical_by_entity.rda"))
 
 portfolio_dependencies_average <- get_dependencies(portfolio_complete_data, dependencies_average_by_entity)
 # Average dependencies by entity (Name business & Group) for each ISIN in the input file and its subsidiaries
-dependencies_average <- portfolio_dependencies_average$portfolio_dependencies
+dependencies_average_by_subsidiary <- portfolio_dependencies_average$portfolio_dependencies_by_subsidiary
 # Aggregated dependencies for each ISIN of the input file (no subsidiaries breakdown)
 dependencies_average_by_isin <- portfolio_dependencies_average$portfolio_dependencies_by_isin
 
@@ -102,26 +108,35 @@ dependencies_average_by_isin <- portfolio_dependencies_average$portfolio_depende
 
 portfolio_dependencies_critical <- get_dependencies(portfolio_complete_data, dependencies_critical_by_entity)
 # Average dependencies by entity (Name business & Group) for each ISIN in the input file and its subsidiaries
-dependencies_critical <- portfolio_dependencies_critical$portfolio_dependencies
+dependencies_critical_by_subsidiary <- portfolio_dependencies_critical$portfolio_dependencies_by_subsidiary
 # Aggregated dependencies for each ISIN of the input file (no subsidiaries breakdown)
 dependencies_critical_by_isin <- portfolio_dependencies_critical$portfolio_dependencies_by_isin
 
 ```
 
+# ----------- Save results ------------
+
 ```{r Save impacts and dependencies, echo = FALSE}
 
-results_path <- paste0("~/GitHub/NatureTool/Assessment/", Sys.Date(),"_Nature_Tool_results.xlsx")
+results_path <- paste0("~/GitHub/NatureTool/Assessment/", Sys.Date(),"_NatureTool_results.xlsx")
 
 wb <- createWorkbook()
 
 addWorksheet(wb, sheet="portfolio_impacts", gridLines = TRUE)
-writeData(wb, sheet = "portfolio_impacts", portfolio_impacts_by_isin)
+writeData(wb, sheet = "portfolio_impacts", impacts_by_isin)
 addWorksheet(wb, sheet="portfolio_dependencies_average", gridLines = TRUE)
 writeData(wb, sheet = "portfolio_dependencies_average", dependencies_average_by_isin)
 addWorksheet(wb, sheet="portfolio_dependencies_critical", gridLines = TRUE)
 writeData(wb, sheet = "portfolio_dependencies_critical", dependencies_critical_by_isin)
 
 saveWorkbook(wb, file = results_path, overwrite = TRUE)
+
+```
+
+# ----------- Output ------------
+
+```{r Display output, echo = FALSE}
+
 
 ```
 

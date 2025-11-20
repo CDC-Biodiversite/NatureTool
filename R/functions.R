@@ -116,30 +116,48 @@ get_subsidiaries <- function(portfolio_data, isin2lei_mapping_final) {
 #' @export
 #'
 
-get_impacts <- function(portfolio_complete_data, all_impacts) {
+get_impacts <- function(portfolio_complete_data, all_impacts, impacts_by_entity) {
+
+  # ==== No aggregation ====
 
   # Line by line impacts: for each ISIN in the input file, impacts across of all subsidiaries and all associated Exiobase industries)
   portfolio_all_impacts <- portfolio_complete_data %>%
     left_join(all_impacts, by = c("ID" = "Name_business")) %>%
     mutate(Footprint_MSAkm2_attributed = Footprint_MSAkm2 * Turnover_attributed_EUR * 10^-6) %>% # [MSA.km²] = [MSA.km²/MEUR] x [EUR] x 10^-6
-    select(-Currency_to_EUR_rate_2024, -rotation_ratio_country, -rotation_ratio, -Footprint_MSAkm2, -Footprint_MSAppb)
+    select(-SubsidiaryID_old, -Group_1, -Currency_to_EUR_rate_2024, -rotation_ratio_country, -rotation_ratio, -Footprint_MSAkm2, -Footprint_MSAppb)
 
-  # Aggregated impacts by Scope, Pressure, Realm and Accounting category for each ISIN of the input file
-  portfolio_impacts_by_isin <- portfolio_all_impacts %>%
-    group_by(Portfolio_Name, ISIN, Amount, Currency) %>%
-    summarize(Turnover_EUR = sum(Turnover_attributed_EUR, na.rm = TRUE)) %>%
-    ungroup() %>%
-    group_by(Portfolio_Name, ISIN, Amount, Currency, Turnover_EUR, Scope, Pressure, realm, accounting_category) %>%
-    summarize(Footprint_MSAkm2_attributed = sum(Footprint_MSAkm2_attributed, na.rm = TRUE))
+  # ==== Aggregation level 1 ====
 
   # Aggregated impacts by Scope, Pressure, Realm and Accounting category for across all subsidiaries (no Exiobase industry breakdown)
-  portfolio_impacts_by_subsidiary <- portfolio_all_impacts %>%
-    group_by(Portfolio_Name, ISIN, Amount, Amount_attributed, Turnover_EUR, Turnover_attributed_EUR, Currency, ID, LEI, Country, NACE, IssuerID, Scope, Pressure, realm, accounting_category) %>%
-    summarize(Footprint_MSAkm2_attributed = sum(Footprint_MSAkm2_attributed, na.rm = TRUE))
+  portfolio_impacts_by_subsidiary <- portfolio_complete_data %>%
+    left_join(impacts_by_entity, by = c("ID" = "Name_business")) %>%
+    mutate(Footprint_MSAkm2_attributed = Footprint_MSAkm2 * Turnover_attributed_EUR * 10^-6) %>% # [MSA.km²] = [MSA.km²/MEUR] x [EUR] x 10^-6
+    select(-SubsidiaryID_old, -Group_1, -Currency_to_EUR_rate_2024, -rotation_ratio_country, -rotation_ratio, -Footprint_MSAkm2, -Footprint_MSAppb)
 
+  # ==== Aggregation level 2 ====
+  # Aggregated impacts by Scope, Pressure, Realm and Accounting category for each ISIN of the input file
+
+  # Footprint aggregation
+  footprint_agg <- portfolio_impacts_by_subsidiary %>%
+    group_by(Portfolio_Name, ISIN, Amount, Currency, Scope, Pressure, realm, accounting_category) %>%
+    summarise(Footprint_MSAkm2_attributed = sum(Footprint_MSAkm2_attributed, na.rm = TRUE), .groups = "drop")
+
+  # Turnover aggregation
+  turnover_agg <- portfolio_impacts_by_subsidiary %>%
+    group_by(Portfolio_Name, ISIN, Amount, Currency, Amount_attributed, Turnover_attributed_EUR,
+             ID, LEI, Name, NACE, Country, IssuerID, Type) %>%
+    summarise(.groups = "drop") %>%  # garde les lignes uniques
+    group_by(Portfolio_Name, ISIN, Amount, Currency) %>%
+    summarise(Turnover_EUR = sum(Turnover_attributed_EUR, na.rm = TRUE), .groups = "drop")
+
+  # Final agregation
+  portfolio_impacts_by_isin <- footprint_agg %>%
+    left_join(turnover_agg, by = c("Portfolio_Name", "ISIN", "Amount", "Currency"))
+
+  # ==== Return results ====
   return(list(portfolio_all_impacts = portfolio_all_impacts,
-              portfolio_impacts_by_isin = portfolio_impacts_by_isin,
-              portfolio_impacts_by_subsidiary =  portfolio_impacts_by_subsidiary))
+              portfolio_impacts_by_subsidiary =  portfolio_impacts_by_subsidiary,
+              portfolio_impacts_by_isin = portfolio_impacts_by_isin))
 }
 
 #' get_dependencies
@@ -157,21 +175,26 @@ get_impacts <- function(portfolio_complete_data, all_impacts) {
 
 get_dependencies <- function(portfolio_complete_data, dependencies_by_entity) {
 
-  # Line by line dependencies: for each ISIN in the input file, dependencies across of all subsidiaries
-  portfolio_dependencies <- portfolio_complete_data %>%
-    left_join(dependencies_by_entity, by = c("ID" = "Name_business")) %>%
-    select(-Currency_to_EUR_rate_2024, -rotation_ratio_country, -rotation_ratio)
+  # ==== Aggregation level 1 ====
 
-  # Aggregated dependencies for each ISIN (entity) of the input file (no subsidiaries breakdown)
-  portfolio_dependencies_by_isin <- portfolio_dependencies %>%
+  # Aggregated dependencies across of all subsidiaries (no Exiobase industry breakdown)
+  portfolio_dependencies_by_subsidiary <- portfolio_complete_data %>%
+    left_join(dependencies_by_entity, by = c("ID" = "Name_business")) %>%
+    select(-SubsidiaryID_old, -Group, -Currency_to_EUR_rate_2024, -rotation_ratio_country, -rotation_ratio)
+
+  # ==== Aggregation level 2 ====
+
+  # Aggregated dependencies for each ISIN of the input file
+  portfolio_dependencies_by_isin <- portfolio_dependencies_by_subsidiary %>%
     group_by(Portfolio_Name, ISIN, Amount, Currency, Scope) %>%
-    mutate(Turnover_group = sum(Turnover_attributed_EUR, na.rm = TRUE)) %>%
+    mutate(Turnover_EUR = sum(Turnover_attributed_EUR, na.rm = TRUE)) %>%
     ungroup() %>%
-    mutate(share_turnover = Turnover_attributed_EUR / Turnover_group) %>%
+    mutate(share_turnover = Turnover_attributed_EUR / Turnover_EUR) %>%
     mutate(across(starts_with("dependency_"), ~ .x * share_turnover, .names = "{.col}")) %>%
-    group_by(Portfolio_Name, ISIN, Amount, Currency, Scope, Turnover_group) %>%
+    group_by(Portfolio_Name, ISIN, Amount, Currency, Scope, Turnover_EUR) %>%
     summarise(across(starts_with("dependency_"), ~ sum(.x, na.rm = TRUE), .names = "{.col}"))
 
-  return(list(portfolio_dependencies = portfolio_dependencies,
+  # ==== Return results ====
+  return(list(portfolio_dependencies_by_subsidiary = portfolio_dependencies_by_subsidiary,
               portfolio_dependencies_by_isin = portfolio_dependencies_by_isin))
 }
