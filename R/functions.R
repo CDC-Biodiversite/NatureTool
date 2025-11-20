@@ -139,20 +139,20 @@ get_impacts <- function(portfolio_complete_data, all_impacts, impacts_by_entity)
 
   # Footprint aggregation
   footprint_agg <- portfolio_impacts_by_subsidiary %>%
-    group_by(Portfolio_Name, ISIN, Amount, Currency, Scope, Pressure, realm, accounting_category) %>%
+    group_by(Portfolio_Name, ISIN, Amount, Amount_EUR, Currency, Scope, Pressure, realm, accounting_category) %>%
     summarise(Footprint_MSAkm2_attributed = sum(Footprint_MSAkm2_attributed, na.rm = TRUE), .groups = "drop")
 
   # Turnover aggregation
   turnover_agg <- portfolio_impacts_by_subsidiary %>%
-    group_by(Portfolio_Name, ISIN, Amount, Currency, Amount_attributed, Turnover_attributed_EUR,
+    group_by(Portfolio_Name, ISIN, Amount, Currency, Amount_EUR, Amount_attributed, Amount_attributed_EUR, Turnover_attributed_EUR,
              ID, LEI, Name, NACE, Country, IssuerID, Type) %>%
     summarise(.groups = "drop") %>%  # garde les lignes uniques
-    group_by(Portfolio_Name, ISIN, Amount, Currency) %>%
+    group_by(Portfolio_Name, ISIN, Amount, Currency, Amount_EUR) %>%
     summarise(Turnover_EUR = sum(Turnover_attributed_EUR, na.rm = TRUE), .groups = "drop")
 
-  # Final agregation
+  # Final aggregation
   portfolio_impacts_by_isin <- footprint_agg %>%
-    left_join(turnover_agg, by = c("Portfolio_Name", "ISIN", "Amount", "Currency"))
+    left_join(turnover_agg, by = c("Portfolio_Name", "ISIN", "Amount", "Currency", "Amount_EUR"))
 
   # ==== Return results ====
   return(list(portfolio_all_impacts = portfolio_all_impacts,
@@ -186,12 +186,12 @@ get_dependencies <- function(portfolio_complete_data, dependencies_by_entity) {
 
   # Aggregated dependencies for each ISIN of the input file
   portfolio_dependencies_by_isin <- portfolio_dependencies_by_subsidiary %>%
-    group_by(Portfolio_Name, ISIN, Amount, Currency, Scope) %>%
+    group_by(Portfolio_Name, ISIN, Amount, Currency,Amount_EUR, Scope) %>%
     mutate(Turnover_EUR = sum(Turnover_attributed_EUR, na.rm = TRUE)) %>%
     ungroup() %>%
     mutate(share_turnover = Turnover_attributed_EUR / Turnover_EUR) %>%
     mutate(across(starts_with("dependency_"), ~ .x * share_turnover, .names = "{.col}")) %>%
-    group_by(Portfolio_Name, ISIN, Amount, Currency, Scope, Turnover_EUR) %>%
+    group_by(Portfolio_Name, ISIN, Amount, Currency, Amount_EUR, Turnover_EUR, Scope) %>%
     summarise(across(starts_with("dependency_"), ~ sum(.x, na.rm = TRUE), .names = "{.col}"))
 
   # ==== Return results ====
